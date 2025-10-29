@@ -1,0 +1,62 @@
+experiment_name: 'tda_vs_neurotoxin_gtsrb_iid'
+seed: 42
+device: "cuda"
+output_dir: "results"
+
+data_params:
+  dataset_name: 'gtsrb'
+  root: 'data'
+  download: true
+  strategy: 'iid'
+
+fl_params:
+  num_clients: 20
+  clients_per_round: 20 
+  num_rounds: 100
+
+training_params:
+  batch_size: 32
+  local_epochs: 1
+  optimizer: 'sgd'
+  lr: 0.01
+  momentum: 0.9
+  weight_decay: 0.00
+  fedprox_mu: 0.01 # Use FedProx for benign clients to stabilize updates
+
+attack_params:
+  enabled: true
+  name: 'neurotoxin' # Specify the Neurotoxin attack
+  malicious_client_ids: [0, 1] # Example: Clients 0 and 1 are attackers
+  target_label: 8
+  attack_start_round: 20 # Start attack after some initial convergence
+  attack_end_round: 50
+  poison_fraction: 0.25 # Fraction of local data attacker poisons
+  mask_k_percent: 0.05 # Neurotoxin: Mask top 5% important params (adjust as needed)
+
+  # Trigger used by Neurotoxin for poisoning
+  trigger:
+    name: 'patch'
+    position: [28, 28] # Bottom-right for 32x32 GTSRB
+    size: [3, 3]
+    color: [1.0, 1.0, 1.0] # White patch
+
+defense_params:
+  enabled: true # Enable the analysis server
+  name: 'tda_bias'
+  # --- TDA Trigger Parameters ---
+  reduction_method: 'pca'      # Method for dimensionality reduction ('pca' or 'dct')
+  pca_variance_ratio: 0.95     # Target variance if using 'pca' (float between 0.0 and 1.0)
+  # dct_components: 50         # Target components if using 'dct' (positive integer)
+  tda_metric_alpha: 0.5        # Alpha value for magnitude_cosine_distance used in TDA trigger
+
+  # --- Decaying Bottleneck Threshold Parameters ---
+  bottleneck_initial_threshold: 0.2  # Starting threshold value (tune this)
+  bottleneck_decay_rate: 0.99       # Decay factor per round (e.g., 0.99 = slow, 0.95 = faster) (tune this)
+  bottleneck_min_threshold: 0.01    # Minimum threshold value (floor) (tune this)
+
+  # --- Bias Filtering Parameters ---
+  bias_metric: 'cosine'     # Metric for comparing bias vectors ('cosine' or 'euclidean')
+  mad_threshold: 0.5        # MAD z-score threshold for filtering bias outliers (tune this)
+
+  # --- General Defense Parameters ---
+  min_clients_for_defense: 5 # Minimum clients needed in a round to run defense logic

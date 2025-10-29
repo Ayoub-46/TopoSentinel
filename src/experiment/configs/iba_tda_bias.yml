@@ -1,0 +1,68 @@
+experiment_name: 'tdabias_vs_iba_gtsrb_iid'
+seed: 42
+device: "cuda"
+output_dir: "results"
+
+data_params:
+  dataset_name: 'gtsrb'
+  root: 'data'
+  download: true
+  strategy: 'iid'
+
+fl_params:
+  num_clients: 20
+  clients_per_round: 20 
+  num_rounds: 100
+
+training_params:
+  batch_size: 32
+  local_epochs: 1
+  optimizer: 'sgd'
+  lr: 0.01
+  momentum: 0.9
+  weight_decay: 0.00
+  fedprox_mu: 0.01 # Use FedProx for benign clients to stabilize updates
+
+attack_params:
+  enabled: true
+  name: "iba"
+  # 10% of clients are malicious
+  malicious_client_ids: [0, 1] 
+  
+  # IBA Client specific params
+  poison_fraction: 0.25 # Attackers poison 70% of their local data
+  target_label: 7 # Example: 'Speed limit (80km/h)' sign in GTSRB
+  attack_start_round: 20 # Let the model stabilize before attacking
+  attack_end_round: 50
+
+  # IBATrigger specific params, passed as 'kwargs' to the trigger's constructor
+  trigger:
+    name: 'iba'
+    kwargs:
+      # Hyperparameters for the U-Net generator and its training
+      alpha: 0.2          # Scaling factor for the perturbation
+      lambda_noise: 0.01  # Weight for the stealthiness loss term
+      trigger_epochs: 50   # Epochs to fine-tune the generator each round
+      trigger_lr: 0.01
+      
+defense_params:
+  enabled: true # Enable the analysis server
+  name: 'tda_bias'
+  # --- Topological Defense specific parameters ---
+  reduction_method: 'pca'
+  pca_variance_ratio: 0.95
+  metric_alpha: 0.9
+
+  # --- Parameters for Decaying Bottleneck Threshold ---
+  bottleneck_initial_threshold: 0.80  # START HIGH (Tune this)
+  bottleneck_decay_rate: 0.99       # Decay per round (Tune this, closer to 1 = slower decay)
+  bottleneck_min_threshold: 0.02    # Floor value (Tune this)
+
+
+  # --- Bias Filtering Parameters ---
+  bias_metric: 'euclidean'     # Metric for comparing bias vectors ('cosine' or 'euclidean')
+  mad_threshold: 2.0        # MAD z-score threshold for filtering bias outliers (tune this)
+
+  # --- General Defense Parameters ---
+  min_clients_for_defense: 5 # Minimum clients needed in a round to run defense logic
+
