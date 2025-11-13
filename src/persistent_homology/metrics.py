@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.spatial.distance import cosine
+from scipy.spatial.distance import cosine, sqeuclidean
 
 def cosine_distance(point1: np.ndarray, point2: np.ndarray) -> float:
     """
@@ -55,3 +55,26 @@ def magnitude_cosine_distance(point1: np.ndarray, point2: np.ndarray, alpha: flo
     combined_dist_sq = alpha * mag_diff_sq + beta * cos_dist
     
     return float(np.sqrt(max(0.0, combined_dist_sq)))
+
+
+def gaussian_kernel_distance(point1: np.ndarray, point2: np.ndarray, gamma: float = 1.0) -> float:
+    """
+    Calculates a distance based on the Gaussian (RBF) kernel: d(x, y) = 1 - K(x, y)
+    where K(x, y) = exp(-gamma * ||x - y||^2)
+
+    Args:
+        point1 (np.ndarray): First 1D vector.
+        point2 (np.ndarray): Second 1D vector.
+        gamma (float, optional): Kernel coefficient. Controls the 'width'
+                                 of the kernel. Defaults to 1.0.
+    Returns:
+        float: The Gaussian kernel distance, bounded between [0, 1].
+    """
+    # 1. Calculate squared Euclidean distance
+    dist_sq = sqeuclidean(point1, point2)
+    
+    # 2. Calculate RBF kernel similarity
+    similarity = np.exp(-gamma * dist_sq)
+    
+    # 3. Return 1 - similarity as the distance
+    return 1.0 - similarity

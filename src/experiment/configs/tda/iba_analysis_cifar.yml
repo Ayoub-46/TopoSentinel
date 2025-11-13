@@ -1,18 +1,18 @@
-experiment_name: 'tdabias_vs_iba_gtsrb_iid'
+experiment_name: 'iba_tda_bias_cifar_iid'
 seed: 42
 device: "cuda"
 output_dir: "results"
 
 data_params:
-  dataset_name: 'gtsrb'
+  dataset_name: 'cifar'
   root: 'data'
   download: true
   strategy: 'iid'
 
 fl_params:
-  num_clients: 20
+  num_clients: 50
   clients_per_round: 20 
-  num_rounds: 100
+  num_rounds: 200
 
 training_params:
   batch_size: 32
@@ -27,13 +27,13 @@ attack_params:
   enabled: true
   name: "iba"
   # 10% of clients are malicious
-  malicious_client_ids: [0, 1] 
+  malicious_client_ids: [0, 1, 2, 3, 4] 
   
   # IBA Client specific params
   poison_fraction: 0.25 # Attackers poison 70% of their local data
   target_label: 7 # Example: 'Speed limit (80km/h)' sign in GTSRB
-  attack_start_round: 20 # Let the model stabilize before attacking
-  attack_end_round: 50
+  attack_start_round: 120 # Let the model stabilize before attacking
+  attack_end_round: 170
 
   # IBATrigger specific params, passed as 'kwargs' to the trigger's constructor
   trigger:
@@ -51,16 +51,17 @@ defense_params:
   # --- Topological Defense specific parameters ---
   reduction_method: 'pca'
   pca_variance_ratio: 0.95
-  metric_alpha: 0.9
+  metric_alpha: 1.0
 
   # --- Parameters for Decaying Bottleneck Threshold ---
-  bottleneck_initial_threshold: 0.80  # START HIGH (Tune this)
+  bottleneck_initial_threshold: 0.35  # START HIGH (Tune this)
   bottleneck_decay_rate: 0.96       # Decay per round (Tune this, closer to 1 = slower decay)
-  bottleneck_min_threshold: 0.1    # Floor value (Tune this)
+  bottleneck_min_threshold: 0.001    # Floor value (Tune this)
 
 
   # --- Bias Filtering Parameters ---
   bias_metric: 'euclidean'     # Metric for comparing bias vectors ('cosine' or 'euclidean')
+  alpha: 0.9
   mad_threshold: 2.0        # MAD z-score threshold for filtering bias outliers (tune this)
 
   # --- General Defense Parameters ---

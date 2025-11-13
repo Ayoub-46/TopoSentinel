@@ -15,10 +15,11 @@ from ..datasets.adapter import DatasetAdapter
 
 # Models
 from ..models.gtsrb import GTSRB_CNN
-from ..models.cifar import CifarNet
+from ..models.cifar import CifarNetGN
 from ..models.mnist import MNISTNet 
 from ..models.mnist import EMNIST_CNN 
-from ..models.unet import UNet
+from ..models.unet import UNet, FEMNISTAutoencoder
+
 
 # Core FL Components
 from ..fl.client import BaseClient, BenignClient
@@ -35,17 +36,14 @@ from ..attacks.triggers.patch_trigger import PatchTrigger
 from ..attacks.triggers.iba import IBATrigger
 from ..attacks.iba_client import IBAClient
 
-
 # Defense Components
 from ..defenses.krum import MKrumServer
 from ..defenses.flame import FlameServer
 from ..defenses.clip_dp import NormClippingServer
 from ..defenses.deepsight import DeepSightServer
-from ..defenses.topological_defense import TopologicalDefenseServer
-from ..defenses.entropy_defense import EntropyDefenseServer
 from ..defenses.analysis_server import AnalysisServer
-from ..defenses.activation_analysis_server import BiasAnalysisServer
 from ..defenses.tda_bias_defense import TopologicalBiasDefenseServer
+
 
 def get_data_and_model(data_config: Dict) -> Tuple[DatasetAdapter, torch.nn.Module]: 
     """Returns the appropriate dataset adapter and model instance."""
@@ -58,7 +56,7 @@ def get_data_and_model(data_config: Dict) -> Tuple[DatasetAdapter, torch.nn.Modu
         model = GTSRB_CNN(num_classes=43)
     elif dataset_name.lower() == 'cifar10':
         adapter = CIFAR10Dataset(root, download)
-        model = CifarNet(num_classes=10)
+        model = CifarNetGN(num_classes=10)
     elif dataset_name.lower() == 'mnist':
         adapter = MNISTDataset(root, download)
         model = MNISTNet() 
@@ -93,6 +91,7 @@ def get_server_instance(config: Dict, model, test_loader, device):
     defense_cfg = config.get('defense_params', {})
     defense_enabled = defense_cfg.get('enabled', False) 
     defense_name = defense_cfg.get('name', 'none').lower() if defense_enabled else 'none'
+    dataset_name = config.get('data_params', {}).get('dataset_name', 'gtsrb').lower()
 
     if defense_name == 'krum':
         print("Instantiating MKrum server.")
@@ -105,19 +104,11 @@ def get_server_instance(config: Dict, model, test_loader, device):
         return NormClippingServer(model, test_loader, device, defense_cfg)
     elif defense_name == 'deepsight':
         print("Instantiating DeepSight server.")
+        defense_cfg['dataset'] = dataset_name
         return DeepSightServer(model, test_loader, device, defense_cfg)
-    elif defense_name == 'tda':
-        print("Instantiating Topological Defense server.")
-        return TopologicalDefenseServer(model=model, testloader=test_loader, device=device, defense_config=defense_cfg)
-    elif defense_name == 'entropy':
-        print("Instantiating Entropy Defense server.")
-        return EntropyDefenseServer(model=model, testloader=test_loader, device=device, defense_config=defense_cfg)
     elif defense_name == 'analysis':
         print("Instantiating Analysis server (no defense).")
         return AnalysisServer(model=model, testloader=test_loader, device=device, defense_config=defense_cfg)
-    elif defense_name == 'bias':
-        print("Instantiating Activation Analysis server (no defense).")
-        return BiasAnalysisServer(model=model, testloader=test_loader, device=device, defense_config=defense_cfg)
     elif defense_name == 'tda_bias':
         print("Instantiating Topological Defense with Bias Analysis server.")
         return TopologicalBiasDefenseServer(model=model, testloader=test_loader, device=device, defense_config=defense_cfg)
@@ -191,7 +182,10 @@ def get_client_instance(
                     color=tuple(trigger_cfg.get('color', [1.0]*in_channels)) 
                 )
             elif trigger_name == 'iba':
-                unet_gen = UNet(in_channel=in_channels, out_channel=in_channels)
+                if in_channels == 1:
+                    unet_gen = FEMNISTAutoencoder(in_channel=in_channels, out_channel=in_channels)
+                else:
+                    unet_gen = UNet(in_channel=in_channels, out_channel=in_channels)
                 trigger_obj = IBATrigger(
                     unet_model=unet_gen,
                     alpha=trigger_cfg.get('alpha', 0.2),
@@ -214,7 +208,7 @@ def get_client_instance(
         elif attack_name == 'iba':
             return IBAClient(attack_config=malicious_config, **base_client_args)
         elif attack_name == 'tdfed':
-             return TDFedClient(attack_config=malicious_config, **base_client_args)
+            return TDFedClient(attack_config=malicious_config, **base_client_args)
         else:
             # Fallback or error for unknown attack
              print(f"Warning: Unknown attack name '{attack_name}' for malicious client {client_id}. Creating BenignClient instead.")

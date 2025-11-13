@@ -35,7 +35,7 @@ class FederatedExperiment:
 
         headers = [
             'round', 'main_accuracy', 'main_loss', 'attack_success_rate',
-            'is_attack_active'
+            'is_attack_active', 'bottleneck_distance', 'bottleneck_threshold'
         ]
         self.logger = MetricsLogger(
             output_dir=self.config.get("output_dir", "results"), 
@@ -156,6 +156,7 @@ class FederatedExperiment:
             
             # --- ASR Evaluation & Logging (Using helper function) ---
             self._evaluate_and_log_round(round_idx, main_acc, main_loss)
+            
 
 
         self.logger.close()    
@@ -221,14 +222,14 @@ class FederatedExperiment:
                             
                     else:
                         print(f"Warning: Could not find trigger object on malicious client {malicious_client_ids[0]}. Cannot evaluate ASR.")
-
-        # --- Logging ---
+        # --- Logging ---           
         log_data = {
             'round': current_round_num, 
             'main_accuracy': main_acc,
             'main_loss': main_loss,
             'attack_success_rate': asr, 
-            'is_attack_active': int(is_attack_active)
+            'is_attack_active': int(is_attack_active),
+            
         }
         self.logger.log_round(log_data)
 

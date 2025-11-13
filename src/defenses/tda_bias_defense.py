@@ -10,7 +10,7 @@ from collections import deque
 from ..fl.server import FedAvgAggregator
 from .utils import flatten_weights, unflatten_weights, reduce_dimension_pca, reduce_dimension_dct
 from ..persistent_homology.analyzer import TopologicalAnalyser
-from ..persistent_homology.metrics import magnitude_cosine_distance # Used for TDA part
+from ..persistent_homology.metrics import magnitude_cosine_distance
 
 try:
     import persim
@@ -18,30 +18,26 @@ except ImportError:
     print("Error: persim library not found. Please install using 'pip install persim'")
     persim = None
 
+
 class TopologicalBiasDefenseServer(FedAvgAggregator):
     """
-    Hybrid Defense:
-    - Inter-round: TDA H0 bottleneck distance (Decaying Threshold trigger).
+    Hybrid Defense (Bias-Only TDA):
+    - Inter-round: TDA H0 bottleneck distance on BIAS DELTAS (Decaying Threshold trigger).
     - Intra-round (if triggered): Filters bias vectors based on distance from median,
       using an adaptively learned [min, max] interval based on benign history percentiles.
     """
     def __init__(self, model: torch.nn.Module, testloader=None, device: Optional[torch.device]=None, defense_config: Optional[Dict] = None, **kwargs):
-        # Pass kwargs to parent (e.g., for logger)
         super().__init__(model, testloader, device, **kwargs) 
         if defense_config is None: defense_config = {}
         if persim is None: raise ImportError("persim library is required but not installed.")
 
-        # TDA Parameters
-        self.reduction_method = defense_config.get('reduction_method', 'pca').lower()
-        self.pca_variance_ratio = defense_config.get('pca_variance_ratio', 0.95)
-        self.dct_components = defense_config.get('dct_components', 50)
-        self.tda_metric_alpha = defense_config.get('tda_metric_alpha', 0.5)
-        self.bottleneck_initial_threshold = defense_config.get('bottleneck_initial_threshold', 0.2)
+        # --- TDA Parameters ---
+        self.bias_metric = defense_config.get('bias_metric', 'euclidean').lower() 
+        self.bottleneck_initial_threshold = defense_config.get('bottleneck_initial_threshold', 0.8)
         self.bottleneck_decay_rate = defense_config.get('bottleneck_decay_rate', 0.99)
         self.bottleneck_min_threshold = defense_config.get('bottleneck_min_threshold', 0.01)
 
         # Bias Filtering Parameters (Adaptive Interval)
-        self.bias_metric = defense_config.get('bias_metric', 'cosine').lower()
         self.bias_history_window = defense_config.get('bias_history_window', 20) # Rounds
         self.bias_interval_lower_percentile = defense_config.get('bias_interval_lower_percentile', 5.0)
         self.bias_interval_upper_percentile = defense_config.get('bias_interval_upper_percentile', 95.0)
@@ -50,19 +46,33 @@ class TopologicalBiasDefenseServer(FedAvgAggregator):
         self.min_clients_for_defense = defense_config.get('min_clients_for_defense', 3)
         self.min_bias_history_size = max(defense_config.get('min_bias_history_size', 50), self.min_clients_for_defense * 3) # Min data points
 
-        print(f"--- Initializing Hybrid TDA-Bias Defense Server (Adaptive Interval Filter) ---")
-        print(f" TDA Trigger: Reduction={self.reduction_method}, Metric=magnitude_cosine(alpha={self.tda_metric_alpha})")
+        print(f"--- Initializing Hybrid TDA-Bias Defense Server (Bias TDA) ---")
+        print(f" TDA Trigger: Metric={self.bias_metric} (on Bias Deltas)")
         print(f"  Decaying Bottleneck: Initial={self.bottleneck_initial_threshold}, DecayRate={self.bottleneck_decay_rate}, Min={self.bottleneck_min_threshold}")
-        print(f" Bias Filtering: Metric=DistFromMedian({self.bias_metric})")
+        print(f" Bias Filtering: Metric=DistFromMedian({self.bias_metric}) (on Bias Deltas)")
         print(f"  Adaptive Bias Interval: Percentiles=[{self.bias_interval_lower_percentile}, {self.bias_interval_upper_percentile}], Margin={self.bias_interval_margin}, MinHistSize={self.min_bias_history_size}, Fallback={self.bias_fallback_interval}")
         print(f" Min Clients: {self.min_clients_for_defense}")
         print(f"-----------------------------------------------------------------------------")
+        
+    
+        # Select the metric function for TDA
+        if self.bias_metric == 'magnitude_cosine':
+            tda_metric_func = magnitude_cosine_distance
+            tda_metric_params = {'alpha': 0.5} 
+        elif self.bias_metric == 'cosine' or self.bias_metric == 'euclidean':
+            tda_metric_func = self.bias_metric 
+            tda_metric_params = {}
+        else:
+             print(f"Warning: Unknown bias_metric '{self.bias_metric}' for TDA. Defaulting to 'euclidean'.")
+             tda_metric_func = 'euclidean'
+             tda_metric_params = {}
 
         self.topological_analyser = TopologicalAnalyser(
             homology_dimensions=(0,),
-            metric=magnitude_cosine_distance,
-            metric_params={'alpha': self.tda_metric_alpha}
+            metric=tda_metric_func,
+            metric_params=tda_metric_params
         )
+        
         self.prev_diagram: Optional[np.ndarray] = None
         self.round_counter = 0
         self.bias_distance_history = deque(maxlen=int(self.bias_history_window * self.min_clients_for_defense * 2.5))
@@ -109,32 +119,44 @@ class TopologicalBiasDefenseServer(FedAvgAggregator):
         aggregated_params_cpu_return = {}
 
         try:
-            # TDA Analysis on FULL Update Deltas (for Trigger)
+            # 1. Extract Bias Vectors and Deltas
             current_global_params = self.get_params()
-            client_deltas_full = []; metadata = None
-            for client_params in original_received_params: # Use list of params
-                delta = {n: client_params[n].cpu() - current_global_params[n].cpu() for n in client_params if n in current_global_params}
-                flat_delta, meta = flatten_weights(delta)
-                if metadata is None: metadata = meta
-                client_deltas_full.append(flat_delta)
+            global_bias_vector = self._extract_bias_vector(current_global_params)
+            
+            client_bias_vectors = {} # map client_id -> bias_vector
+            valid_client_ids_bias = []
 
-            if not client_deltas_full:
-                 aggregated_params_cpu_return = super().aggregate(); self.round_counter += 1; return aggregated_params_cpu_return
+            if global_bias_vector is None:
+                print("Warning: Could not extract global bias vector. Skipping defense.")
+                raise Exception("Failed to extract global bias vector.")
 
-            flat_updates_matrix_full = np.vstack(client_deltas_full).astype(np.float64)
+            for i, client_id in enumerate(client_ids_received):
+                client_params = original_received_params[i]
+                bias_vector = self._extract_bias_vector(client_params)
+                if bias_vector is not None:
+                    client_bias_vectors[client_id] = bias_vector
+                    valid_client_ids_bias.append(client_id)
+                else:
+                    print(f" Warning: Could not extract bias vector for client ID {client_id}.")
 
-            if self.reduction_method == 'pca': reduced_updates_full = reduce_dimension_pca(flat_updates_matrix_full, self.pca_variance_ratio)
-            elif self.reduction_method == 'dct': reduced_updates_full = reduce_dimension_dct(flat_updates_matrix_full, self.dct_components)
-            else: reduced_updates_full = flat_updates_matrix_full
-            if reduced_updates_full is None or reduced_updates_full.shape[0] != num_received:
-                 aggregated_params_cpu_return = super().aggregate(); self.round_counter += 1; return aggregated_params_cpu_return
+            if len(valid_client_ids_bias) < self.min_clients_for_defense:
+                 print("Warning: Not enough valid bias vectors. Skipping defense.")
+                 raise Exception("Not enough valid bias vectors for defense.")
 
-            current_diagram = self.topological_analyser.compute_diagram(reduced_updates_full)
+            # Create bias *delta* matrix (client_vector - global_vector) for TDA
+            # Note: We only analyze clients where bias extraction succeeded
+            bias_delta_matrix = np.vstack([client_bias_vectors[cid] for cid in valid_client_ids_bias]) - global_bias_vector
+            print(f" Extracted bias delta matrix shape: {bias_delta_matrix.shape}")
+
+            # 2. Compute H0 Diagram (on Bias Deltas)
+            current_diagram = self.topological_analyser.compute_diagram(bias_delta_matrix)
             if current_diagram is None or current_diagram.shape[0] == 0:
+                 print("Warning: Failed to compute persistence diagram on bias deltas.")
                  self.prev_diagram = None; aggregated_params_cpu_return = super().aggregate(); self.round_counter += 1; return aggregated_params_cpu_return
 
             h0_diagram = current_diagram[current_diagram[:, 2] == 0]
 
+            # 3. Inter-round Analysis (Bottleneck Distance)
             bottleneck_dist = np.nan
             if self.prev_diagram is not None and self.prev_diagram.shape[0] > 0 and h0_diagram.shape[0] > 0:
                 finite_prev_h0 = self.prev_diagram[np.isfinite(self.prev_diagram[:, 1])]
@@ -142,53 +164,49 @@ class TopologicalBiasDefenseServer(FedAvgAggregator):
                 if finite_prev_h0.shape[0] > 0 and finite_curr_h0.shape[0] > 0:
                      try:
                          bottleneck_dist = persim.bottleneck(finite_prev_h0[:, :2], finite_curr_h0[:, :2])
-                         print(f" Bottleneck distance (Full Update): {bottleneck_dist:.4f}")
+                         print(f" Bottleneck distance (Bias Deltas): {bottleneck_dist:.4f}")
                      except Exception as persim_err:
                          print(f"Warning: persim.bottleneck failed: {persim_err}"); bottleneck_dist = np.nan
 
+            # 4. Trigger Filtering
             if not np.isnan(bottleneck_dist) and bottleneck_dist > current_bottleneck_threshold:
                 perform_filtering = True
-                print(f" *** TDA Change Detected. Triggering BIAS filtering. ***")
+                print(f" *** TDA Change Detected (Bias Deltas). Triggering BIAS filtering. ***")
             else:
                 print(" No significant TDA change detected. Updating prev_diagram.")
                 self.prev_diagram = h0_diagram
 
-            bias_vectors = {} # map client_id -> bias_vector
-            valid_client_ids_bias = []
-            for i, client_id in enumerate(client_ids_received):
-                client_params = original_received_params[i] # Get params by original index
-                bias_vector = self._extract_bias_vector(client_params)
-                if bias_vector is not None:
-                    bias_vectors[client_id] = bias_vector
-                    valid_client_ids_bias.append(client_id)
-                else:
-                    print(f" Warning: Could not extract bias vector for client ID {client_id}.")
-
+            # --- Intra-round Filtering (uses BIAS VECTORS) ---
+            # We calculate distances from the median of the *absolute* bias vectors
+            
             dists_from_median_map = {} # map client_id -> dist_from_median
             valid_dists_this_round = [] # List of valid distances
-            if len(valid_client_ids_bias) >= self.min_clients_for_defense:
-                bias_matrix = np.vstack([bias_vectors[cid] for cid in valid_client_ids_bias])
-                try:
-                    median_bias_vector = np.median(bias_matrix, axis=0)
-                    dists_from_median_valid = np.zeros(len(valid_client_ids_bias))
-                    if self.bias_metric == 'cosine':
-                         median_norm = np.linalg.norm(median_bias_vector)
-                         for j, cid in enumerate(valid_client_ids_bias):
-                             bias_v = bias_vectors[cid]; bias_v_norm = np.linalg.norm(bias_v)
-                             if bias_v_norm < 1e-9 or median_norm < 1e-9: dists_from_median_valid[j] = 1.0
-                             else: dists_from_median_valid[j] = cosine(bias_v, median_bias_vector)
-                    else: # Euclidean
-                         dists_from_median_valid = np.linalg.norm(bias_matrix - median_bias_vector, axis=1)
+            
+            # bias_matrix is on valid_client_ids_bias
+            bias_matrix_abs = np.vstack([client_bias_vectors[cid] for cid in valid_client_ids_bias])
+            try:
+                median_bias_vector = np.median(bias_matrix_abs, axis=0)
+                dists_from_median_valid = np.zeros(len(valid_client_ids_bias))
+                if self.bias_metric == 'cosine':
+                     median_norm = np.linalg.norm(median_bias_vector)
+                     for j, cid in enumerate(valid_client_ids_bias):
+                         bias_v = client_bias_vectors[cid]; bias_v_norm = np.linalg.norm(bias_v)
+                         if bias_v_norm < 1e-9 or median_norm < 1e-9: dists_from_median_valid[j] = 1.0
+                         else: dists_from_median_valid[j] = cosine(bias_v, median_bias_vector)
+                else: # Euclidean
+                     dists_from_median_valid = np.linalg.norm(bias_matrix_abs - median_bias_vector, axis=1)
 
-                    dists_from_median_map = {cid: dist for cid, dist in zip(valid_client_ids_bias, dists_from_median_valid)}
-                    valid_dists_this_round = dists_from_median_valid
+                dists_from_median_map = {cid: dist for cid, dist in zip(valid_client_ids_bias, dists_from_median_valid)}
+                valid_dists_this_round = dists_from_median_valid
 
-                    if len(valid_dists_this_round) > 0:
-                         print(f" Current Round DistFromMedian Bias Stats: Median={np.median(valid_dists_this_round):.4f}, Min={np.min(valid_dists_this_round):.4f}, Max={np.max(valid_dists_this_round):.4f}")
+                if len(valid_dists_this_round) > 0:
+                     print(f" Current Round DistFromMedian Bias *Vector* Stats: Median={np.median(valid_dists_this_round):.4f}, Min={np.min(valid_dists_this_round):.4f}, Max={np.max(valid_dists_this_round):.4f}")
 
-                except Exception as dist_err:
-                    print(f" Error calculating bias distances from median: {dist_err}.")
+            except Exception as dist_err:
+                print(f" Error calculating bias distances from median: {dist_err}.")
+                dists_from_median_map = {} # Ensure map is empty on error
 
+            # Filtering Logic (using learned interval)
             if perform_filtering:
                 print(f"--- Filtering based on Learned Bias Interval ({self.bias_interval_lower_percentile}-{self.bias_interval_upper_percentile}th percentile) ---")
                 current_benign_interval = self.bias_fallback_interval
@@ -213,6 +231,7 @@ class TopologicalBiasDefenseServer(FedAvgAggregator):
 
                 if dists_from_median_map: # Check if distances were calculated
                      outlier_client_ids = set()
+                     # Check all received clients
                      for client_id in client_ids_received:
                          dist = dists_from_median_map.get(client_id, np.inf) # Get dist or treat as outlier
                          if not (current_benign_interval[0] <= dist <= current_benign_interval[1]):
@@ -223,7 +242,6 @@ class TopologicalBiasDefenseServer(FedAvgAggregator):
                      
                      if num_filtered > 0:
                          print(f" Identified {num_filtered} outliers via Bias Adaptive Interval (Client IDs: {sorted(list(outlier_client_ids))}). Keeping {len(client_ids_to_keep)}.");
-                    
                      else:
                          print(" No outliers detected by bias vector Adaptive Interval.")
                          
