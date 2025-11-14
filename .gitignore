@@ -1,0 +1,11 @@
+.env
+data/
+results/
+__pycache__/
+*.pyc
+logs/
+.vscode/
+plots/
+*.sh
+*.err
+*.out
