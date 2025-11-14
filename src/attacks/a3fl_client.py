@@ -46,14 +46,12 @@ class A3FLClient(BenignClient):
         base_dataset = self.trainloader.dataset
         num_samples = len(base_dataset)
         
-        # Ensure we don't sample more than available
         k = min(self.trigger_sample_size, num_samples)
-        if k == 0: return None # Handle case with no data
+        if k == 0: return None 
 
         indices = np.random.choice(np.arange(num_samples), size=k, replace=False).tolist()
         sampled_ds = Subset(base_dataset, indices)
         
-        # Ensure batch size is not larger than the sample size
         batch_size = min(getattr(self.trainloader, "batch_size", 32), k)
         return DataLoader(sampled_ds, batch_size=batch_size, shuffle=True)
 
@@ -63,7 +61,7 @@ class A3FLClient(BenignClient):
         if not (self.attack_start_round <= round_idx <= self.attack_end_round):
             return super().local_train(epochs, round_idx)
         
-        # --- Stage 1: Optimize the trigger for the current global model ---
+        # 1. Optimize the trigger for the current global model
         print(f"\n--- A3FL Client [{self.id}] optimizing trigger for round {round_idx} ---")
         trigger_dl = self._build_trigger_dataloader()
         if trigger_dl:
@@ -73,7 +71,7 @@ class A3FLClient(BenignClient):
                 target_class=self.target_label
             )
 
-        # --- Stage 2: Train on data poisoned with the new trigger ---
+        # 2. Backdoor training
         poisoned_dataset = BackdoorDataset(
             original_dataset=self.trainloader.dataset,
             trigger_fn=self.trigger.apply,
@@ -83,14 +81,11 @@ class A3FLClient(BenignClient):
         )
         poisoned_loader = DataLoader(poisoned_dataset, batch_size=self.trainloader.batch_size, shuffle=True)
 
-        # Use the parent's training method on the poisoned loader
         original_loader = self.trainloader
         try:
             self.trainloader = poisoned_loader
-            # Use the 'epochs' argument from the runner for this training stage
             result = super().local_train(malicious_epochs, round_idx)
         finally:
-            # Always restore the original loader
             self.trainloader = original_loader
 
         return result

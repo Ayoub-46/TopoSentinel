@@ -45,7 +45,6 @@ class NeurotoxinClient(BenignClient):
         super().__init__(*args, **kwargs)
         self.attack_config = attack_config
 
-        # Extract attack parameters from the config dictionary
         self.trigger = attack_config.get('trigger', PatchTrigger())
         self.target_label = attack_config.get('target_label', 0)
         self.attack_start_round = attack_config.get('attack_start_round', 0)
@@ -53,7 +52,6 @@ class NeurotoxinClient(BenignClient):
         self.mask_k_percent = attack_config.get('mask_k_percent', 0.05)
         self.poison_fraction = attack_config.get('poison_fraction', 0.25)
         
-        # Create the poisoned dataset once for performance
         self.poisoned_dataset = BackdoorDataset(
             original_dataset=self.trainloader.dataset,
             trigger_fn=self.trigger.apply,
@@ -87,19 +85,17 @@ class NeurotoxinClient(BenignClient):
                 samples, the malicious model weights, and tracked training metrics.
         """
         
-        # If outside attack window, behave like a benign client
         if not (self.attack_start_round <= round_idx <= self.attack_end_round):
             print(f"\n--- Neurotoxin Client [{self.id}] behaving benignly for round {round_idx} ---")
             return super().local_train(epochs, round_idx)
         
         print(f"\n--- Neurotoxin Client [{self.id}] starting hybrid attack for round {round_idx} ---")
 
-        # --- Build robust grad mask (top-k by normalized importance) ---
+        # 1. Build grad mask (top-k by normalized importance) 
         grad_mask: Optional[Dict[str, torch.Tensor]] = None
         if prev_global_grad is None:
             print(f"Client [{self.id}]: No previous global gradient. Attacking without mask.")
         else:
-            # (Detailed mask creation logic as you implemented it)
             model_param_keys = set(name for name, _ in self.model.named_parameters())
             importance_parts = []
             key_to_delta = {}
@@ -127,7 +123,7 @@ class NeurotoxinClient(BenignClient):
                     importance_key = (delta_cpu.abs() / (param_cpu.abs() + eps))
                     grad_mask[name] = (importance_key < threshold)
 
-        # --- Create Dataloader and perform local training ---
+        # 2. Backdoor training with gradient masking
         poisoned_loader = DataLoader(self.poisoned_dataset, batch_size=self.trainloader.batch_size, shuffle=True)
         self.model.train()
         train_loss, correct, total = 0.0, 0, 0
@@ -156,7 +152,6 @@ class NeurotoxinClient(BenignClient):
         if self.scheduler:
             self.scheduler.step()
         
-        # --- Package and return results ---
         num_batches = len(poisoned_loader)
         avg_loss = train_loss / (num_batches * malicious_epochs) if num_batches > 0 else float('nan')
         accuracy = correct / total if total > 0 else 0.0

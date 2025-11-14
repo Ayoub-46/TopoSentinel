@@ -1,5 +1,3 @@
-# In a new file: src/attacks/iba.py
-
 from typing import Dict, Any
 import torch
 from torch.utils.data import DataLoader
@@ -34,17 +32,16 @@ class IBAClient(BenignClient):
             return super().local_train(epochs, round_idx)
         
         try:
-            # --- Phase 1: Optimize the Trigger Generator ---
+            # 1. Optimize the trigger generator 
             print(f"\n--- IBA Client [{self.id}] optimizing U-Net generator for round {round_idx} ---")
-            
-            # The generator is trained on the full, clean local dataset
+                      
             self.trigger.train_generator(
                 classifier_model=self.model,
                 dataloader=self.trainloader, # We can use the original clean loader
                 target_class=self.target_label
             )
 
-            # --- Phase 2: Training with the Optimized Generator ---
+            # 2. Backdoor training
             poisoned_dataset = BackdoorDataset(
                 original_dataset=self.trainloader.dataset,
                 trigger_fn=self.trigger.apply, # Use the newly trained generator's apply method
@@ -54,7 +51,6 @@ class IBAClient(BenignClient):
             )
             poisoned_loader = DataLoader(poisoned_dataset, batch_size=self.trainloader.batch_size, shuffle=True)
 
-            # Temporarily swap the trainloader and use the parent's training method
             original_loader = self.trainloader
             try:
                 self.trainloader = poisoned_loader
@@ -65,7 +61,6 @@ class IBAClient(BenignClient):
             return result
 
         finally:
-            # Force PyTorch to release unused cached memory on the GPU
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             print(f"IBA Client [{self.id}] finished training, GPU cache cleared.")

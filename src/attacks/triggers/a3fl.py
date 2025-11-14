@@ -18,21 +18,17 @@ class A3FLTrigger(BaseTrigger):
         """
         Initializes the A3FL trigger.
         """
-        # The trigger is a full-size tensor, initialized to 0.5 as in the repo.
-        # The patch is applied using a separate mask.
+
         initial_pattern = torch.ones(in_channels, image_size[0], image_size[1]) * 0.5
         
-        # The mask defines the patch area.
         mask = torch.zeros(in_channels, image_size[0], image_size[1])
         mask[:, position[1]:position[1]+size[1], position[0]:position[0]+size[0]] = 1.0
         
         self.mask = mask
-        # The pattern itself is what gets optimized.
         self.pattern = initial_pattern
 
         super().__init__(position, size, self.pattern, alpha)
         
-        # Optimization hyperparameters
         self.trigger_epochs = trigger_epochs
         self.trigger_lr = trigger_lr
         self.lambda_balance = lambda_balance
@@ -118,13 +114,11 @@ class A3FLTrigger(BaseTrigger):
                 total_loss_batch.backward()
                 
                 with torch.no_grad():
-                    # PGD step using the sign of the gradient, as in the official repo
                     pattern.sub_(self.trigger_lr * pattern.grad.sign())
-                    pattern.clamp_(0, 1) # Project back to valid range
+                    pattern.clamp_(0, 1) 
 
         self._unfreeze_model(classifier_model)
         
-        # Update the class's pattern with the optimized result
         self.pattern = pattern.detach().cpu()
         print("--- A3FL Trigger training finished ---")
 

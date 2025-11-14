@@ -27,7 +27,6 @@ class IBATrigger(BaseTrigger):
         self.generator.eval()
         self.lambda_noise = lambda_noise
         self.is_static = False
-        # Position and size are not used for this full-image trigger.
         super().__init__(position=(0, 0), size=(0, 0), pattern=self.generator, alpha=alpha)
 
     def _freeze_model(self, model):
@@ -61,23 +60,15 @@ class IBATrigger(BaseTrigger):
                 inputs = inputs.to(device)
                 optimizer.zero_grad()
                 
-                # Generate perturbation
                 perturbation = self.generator(inputs)
                 poisoned_inputs = torch.clamp(inputs + self.alpha * perturbation, 0.0, 1.0)
                 poisoned_labels = torch.full((inputs.size(0),), target_class, dtype=torch.long, device=device)
                 
-                # Get classifier's output
                 outputs = classifier_model(poisoned_inputs)
                 
-                # --- Combined Loss Calculation (Aligned with official repo) ---
-                # 1. Adversarial Loss (to make the attack work)
                 l_adv = loss_fn(outputs, poisoned_labels)
-                
-                # 2. Noise Regularization Loss (to keep the trigger stealthy)
                 l_noise = torch.norm(perturbation.view(perturbation.size(0), -1), p=2, dim=1).mean()
-
                 loss = l_adv + self.lambda_noise * l_noise
-                # --- End Combined Loss ---
 
                 loss.backward()
                 optimizer.step()
@@ -95,7 +86,6 @@ class IBATrigger(BaseTrigger):
         self.generator.to(device)
         self.generator.eval()
         
-        # Add a batch dimension, generate perturbation, and remove batch dimension
         perturbation = self.generator(image.unsqueeze(0)).squeeze(0)
         
         poisoned_image = torch.clamp(image + self.alpha * perturbation, 0.0, 1.0)

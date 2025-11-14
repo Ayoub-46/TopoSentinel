@@ -9,3 +9,5 @@ plots/
 *.sh
 *.err
 *.out
+
+src/defenses/tda_bias_defense.py
