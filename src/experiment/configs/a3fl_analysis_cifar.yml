@@ -48,7 +48,7 @@ attack_params:
       adv_lr: 0.01
 defense_params:
   enabled: true # Enable the analysis server
-  name: 'deepsight'
+  name: 'flame'
   # --- FLAME specific parameters ---
   flame_lambda: 0.001
   flame_eta: 1.0

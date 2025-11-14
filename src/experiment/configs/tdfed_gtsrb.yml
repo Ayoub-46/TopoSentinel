@@ -1,0 +1,56 @@
+experiment_name: 'base_fl_gtsrb_iid'
+seed: 42
+device: "cuda"
+output_dir: "results"
+
+data_params:
+  dataset_name: 'mnist'
+  root: 'data'
+  download: true
+  strategy: 'iid'
+
+fl_params:
+  num_clients: 20
+  clients_per_round: 20 
+  num_rounds: 30
+
+training_params:
+  batch_size: 32
+  local_epochs: 1
+  optimizer: 'sgd'
+  lr: 0.01
+  momentum: 0.9
+  weight_decay: 0.00
+
+
+attack_params:
+  enabled: true
+  name: 'tdfed' 
+  malicious_client_ids: [0, 1, 2, 3] 
+  target_label: 8
+  attack_start_round: 5 
+  attack_end_round: 20
+  poison_fraction: 1.0
+  malicious_epochs: 15    
+  
+  beta: 0.2
+  
+  num_indicators: 10
+  indicator_kappa: 1e5  
+  
+  noise_mask_epochs: 5    
+  noise_mask_lr: 0.01
+  adaptive_alpha_bounds: [0.1, 0.9]
+
+  trigger:
+    name: 'patch'
+    position: [24, 24]
+    size: [3, 3]
+    color: [1.0]
+
+defense_params:
+  enabled: true # Enable the analysis server
+  name: 'flame'
+  # --- FLAME specific parameters ---
+  flame_lambda: 0.001
+  flame_eta: 1.0

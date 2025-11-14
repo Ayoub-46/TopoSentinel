@@ -140,7 +140,7 @@ class FederatedExperiment:
 
             # Store params *after* aggregation for the next round's TDFed
             params_after_agg_cpu = {k: v.cpu().clone() for k, v in self.server.get_params().items()}
-            self.prev_global_params_cpu = params_after_agg_cpu # Update for TDFed
+            self.prev_global_params_cpu = params_before_agg_cpu # Update for TDFed
 
             # --- Calculate and store GRADIENT for the next round's Neurotoxin ---
             self.prev_global_grad_cpu = {
