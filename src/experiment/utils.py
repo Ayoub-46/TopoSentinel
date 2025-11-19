@@ -35,6 +35,8 @@ from ..attacks.triggers.a3fl import A3FLTrigger
 from ..attacks.triggers.patch_trigger import PatchTrigger
 from ..attacks.triggers.iba import IBATrigger
 from ..attacks.iba_client import IBAClient
+from ..attacks.darkfed import DarkFedClient
+from ..attacks.mimic import MimicryClient
 
 # Defense Components
 from ..defenses.krum import MKrumServer
@@ -151,7 +153,7 @@ def get_client_instance(
         print(f"Instantiating malicious client {client_id} for attack: {attack_name}")
 
         # --- 2. Create the Trigger object explicitly ---
-        trigger_obj = None
+        
         if 'trigger' in attack_cfg:
             trigger_cfg = attack_cfg['trigger']
             trigger_name = trigger_cfg.get('name')
@@ -162,7 +164,7 @@ def get_client_instance(
             dataset_name_lower = data_cfg.get('dataset_name', 'mnist').lower() 
             image_size = tuple(trigger_cfg.get('image_size', img_size_map.get(dataset_name_lower, (32,32)))) 
             in_channels = trigger_cfg.get('in_channels', channels_map.get(dataset_name_lower, 3)) 
-
+            trigger_obj = None
             if trigger_name == 'a3fl':
                 trigger_obj = A3FLTrigger(
                     position=tuple(trigger_cfg.get('position', [image_size[0]-4, image_size[1]-4])), 
@@ -209,6 +211,10 @@ def get_client_instance(
             return IBAClient(attack_config=malicious_config, **base_client_args)
         elif attack_name == 'tdfed':
             return TDFedClient(attack_config=malicious_config, **base_client_args)
+        elif attack_name == 'darkfed': 
+            return DarkFedClient(attack_config=malicious_config, **base_client_args)
+        elif attack_name == 'mimicry':
+            return MimicryClient(attack_config=malicious_config, **base_client_args)
         else:
             # Fallback or error for unknown attack
              print(f"Warning: Unknown attack name '{attack_name}' for malicious client {client_id}. Creating BenignClient instead.")

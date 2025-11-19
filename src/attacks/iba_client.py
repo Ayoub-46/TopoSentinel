@@ -37,26 +37,27 @@ class IBAClient(BenignClient):
                       
             self.trigger.train_generator(
                 classifier_model=self.model,
-                dataloader=self.trainloader, # We can use the original clean loader
+                dataloader=self.trainloader,
                 target_class=self.target_label
             )
 
             # 2. Backdoor training
             poisoned_dataset = BackdoorDataset(
                 original_dataset=self.trainloader.dataset,
-                trigger_fn=self.trigger.apply, # Use the newly trained generator's apply method
+                trigger_fn=self.trigger.apply, 
                 target_label=self.target_label,
                 poison_fraction=self.poison_fraction,
                 seed=self.seed
             )
-            poisoned_loader = DataLoader(poisoned_dataset, batch_size=self.trainloader.batch_size, shuffle=True)
+
+            poisoned_loader = DataLoader(poisoned_dataset, batch_size=self.trainloader.batch_size, shuffle=True, num_workers=4)
 
             original_loader = self.trainloader
             try:
                 self.trainloader = poisoned_loader
                 result = super().local_train(epochs, round_idx)
             finally:
-                self.trainloader = original_loader # Always restore
+                self.trainloader = original_loader
             
             return result
 

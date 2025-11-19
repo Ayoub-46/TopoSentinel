@@ -39,6 +39,7 @@ class A3FLClient(BenignClient):
         self.poison_fraction = attack_config.get('poison_fraction', 0.25)
         self.seed = attack_config.get('seed', 42)
         self.trigger_sample_size = attack_config.get('trigger_sample_size', 512)
+        self.malicious_epochs = attack_config.get('malicious_epochs', 1)
         
         
     def _build_trigger_dataloader(self) -> DataLoader:
@@ -55,7 +56,7 @@ class A3FLClient(BenignClient):
         batch_size = min(getattr(self.trainloader, "batch_size", 32), k)
         return DataLoader(sampled_ds, batch_size=batch_size, shuffle=True)
 
-    def local_train(self, round_idx: int, epochs: int = 1, malicious_epochs: int=20, **kwargs) -> Dict[str, Any]:
+    def local_train(self, round_idx: int, epochs: int = 1, **kwargs) -> Dict[str, Any]:
         """Performs the two-stage A3FL attack."""
 
         if not (self.attack_start_round <= round_idx <= self.attack_end_round):
@@ -84,7 +85,7 @@ class A3FLClient(BenignClient):
         original_loader = self.trainloader
         try:
             self.trainloader = poisoned_loader
-            result = super().local_train(malicious_epochs, round_idx)
+            result = super().local_train(self.malicious_epochs, round_idx)
         finally:
             self.trainloader = original_loader
 

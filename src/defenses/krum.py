@@ -8,8 +8,7 @@ from ..fl.server import FedAvgAggregator
 
 class MKrumServer(FedAvgAggregator):
     """
-    Implements the Multi-Krum (M-Krum) defense mechanism, adapted to
-    be compatible with the new FedAvgAggregator base class.
+    Implements the Multi-Krum (M-Krum) defense mechanism.
     
     It selects the 'm' clients with the lowest Krum scores and
     performs a standard FedAvg on only that subset.
@@ -50,8 +49,6 @@ class MKrumServer(FedAvgAggregator):
             print(f"Warning: Not enough clients ({num_updates}) for Krum with f={self.num_byzantine}. Falling back to standard FedAvg.")
             # super().aggregate() will average all clients and clear the buffer.
             return super().aggregate()
-
-        # --- M-Krum Algorithm ---
         
         # 1. Create a stable mapping from index (0...n-1) to client_id
         client_ids_list = list(self.received_updates.keys())
@@ -77,11 +74,10 @@ class MKrumServer(FedAvgAggregator):
 
         # 5. For each client, find the sum of distances to its k nearest neighbors
         scores = []
-        # k = n - f - 2 (from the paper, number of "closest" clients to sum)
+        # k = n - f - 2 (number of "closest" clients to sum)
         num_neighbors = num_updates - self.num_byzantine - 2
         for i in range(num_updates):
             sorted_dists, _ = torch.sort(distances[i])
-            # The first element is dist to itself (0), so we take [1] to [num_neighbors+1]
             scores.append(torch.sum(sorted_dists[1:num_neighbors+1]).item())
         
         # 6. Select the 'm' clients with the lowest scores
@@ -95,7 +91,6 @@ class MKrumServer(FedAvgAggregator):
 
         # 8. Aggregate only the selected clients using standard FedAvg logic
         
-        # Get total samples from *only* the selected clients
         total_samples = sum(self.received_updates[cid]['length'] for cid in selected_client_ids)
         
         if total_samples == 0:
@@ -108,7 +103,6 @@ class MKrumServer(FedAvgAggregator):
         first_params = self.received_updates[first_client_id]['params']
         
         for k in first_params.keys():
-            # Accumulate weighted sums on CPU
             acc = torch.zeros_like(first_params[k], dtype=torch.float32)
             for cid in selected_client_ids:
                 client_params = self.received_updates[cid]['params']
@@ -120,10 +114,8 @@ class MKrumServer(FedAvgAggregator):
                 
             averaged[k] = acc # Final averaged param is on CPU
 
-        # Load the new averaged parameters into the server model
         self.set_params({k: v.to(self.device) for k, v in averaged.items()})
 
-        # Clear the buffer for the next round
         self.received_updates = {}
         
         return {k: v.cpu().clone() for k, v in averaged.items()}

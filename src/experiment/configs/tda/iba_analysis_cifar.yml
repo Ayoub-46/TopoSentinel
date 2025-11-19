@@ -4,7 +4,7 @@ device: "cuda"
 output_dir: "results"
 
 data_params:
-  dataset_name: 'cifar'
+  dataset_name: 'cifar10'
   root: 'data'
   download: true
   strategy: 'iid'

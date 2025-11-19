@@ -51,7 +51,7 @@ class NeurotoxinClient(BenignClient):
         self.attack_end_round = attack_config.get('attack_end_round', float('inf'))
         self.mask_k_percent = attack_config.get('mask_k_percent', 0.05)
         self.poison_fraction = attack_config.get('poison_fraction', 0.25)
-        
+        self.malicious_epochs = attack_config.get('malicious_epochs', 1)
         self.poisoned_dataset = BackdoorDataset(
             original_dataset=self.trainloader.dataset,
             trigger_fn=self.trigger.apply,
@@ -60,7 +60,7 @@ class NeurotoxinClient(BenignClient):
             seed=attack_config.get('seed', 42)
         )
         
-    def local_train(self, round_idx: int, epochs: int = 1, prev_global_grad: Optional[Dict[str, torch.Tensor]] = None, malicious_epochs: int =10, **kwargs) -> Dict[str, Any]:
+    def local_train(self, round_idx: int, epochs: int = 1, prev_global_grad: Optional[Dict[str, torch.Tensor]] = None, **kwargs) -> Dict[str, Any]:
         """
         Performs a poisoned local training round using the Neurotoxin strategy.
 
@@ -128,7 +128,7 @@ class NeurotoxinClient(BenignClient):
         self.model.train()
         train_loss, correct, total = 0.0, 0, 0
 
-        for _ in range(malicious_epochs):
+        for _ in range(self.malicious_epochs):
             for data, target in poisoned_loader:
                 data, target = data.to(self.device), target.to(self.device)
                 self.optimizer.zero_grad()
@@ -153,7 +153,7 @@ class NeurotoxinClient(BenignClient):
             self.scheduler.step()
         
         num_batches = len(poisoned_loader)
-        avg_loss = train_loss / (num_batches * malicious_epochs) if num_batches > 0 else float('nan')
+        avg_loss = train_loss / (num_batches * self.malicious_epochs) if num_batches > 0 else float('nan')
         accuracy = correct / total if total > 0 else 0.0
         metrics = {'loss': avg_loss, 'accuracy': accuracy}
        

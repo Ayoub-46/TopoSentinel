@@ -1,0 +1,53 @@
+experiment_name: 'iba_flame_cifar_iid'
+seed: 42
+device: "cuda"
+output_dir: "results"
+
+data_params:
+  dataset_name: 'cifar'
+  root: 'data'
+  download: true
+  strategy: 'iid'
+
+fl_params:
+  num_clients: 50
+  clients_per_round: 20 
+  num_rounds: 200
+
+training_params:
+  batch_size: 32
+  local_epochs: 1
+  optimizer: 'sgd'
+  lr: 0.01
+  momentum: 0.9
+  weight_decay: 0.00
+  fedprox_mu: 0.01 # Use FedProx for benign clients to stabilize updates
+
+attack_params:
+  enabled: true
+  name: "iba"
+  # 10% of clients are malicious
+  malicious_client_ids: [0, 1, 2, 3, 4] 
+  
+  # IBA Client specific params
+  poison_fraction: 0.25 # Attackers poison 70% of their local data
+  target_label: 7 # Example: 'Speed limit (80km/h)' sign in GTSRB
+  attack_start_round: 120 # Let the model stabilize before attacking
+  attack_end_round: 170
+
+  # IBATrigger specific params, passed as 'kwargs' to the trigger's constructor
+  trigger:
+    name: 'iba'
+    kwargs:
+      # Hyperparameters for the U-Net generator and its training
+      alpha: 0.2          # Scaling factor for the perturbation
+      lambda_noise: 0.01  # Weight for the stealthiness loss term
+      trigger_epochs: 50   # Epochs to fine-tune the generator each round
+      trigger_lr: 0.01
+      
+defense_params:
+  enabled: true # Enable the analysis server
+  name: 'flame'
+  # --- FLAME specific parameters ---
+  flame_lambda: 0.001
+  flame_eta: 1.0

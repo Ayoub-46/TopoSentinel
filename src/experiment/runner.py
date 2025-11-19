@@ -51,7 +51,23 @@ class FederatedExperiment:
         self.adapter, initial_model = get_data_and_model(self.config['data_params'])
         self.adapter.setup()
 
+        load_pretrained = self.config['data_params'].get('load_pretrained', False)
+        load_model_path = self.config['data_params'].get('load_model_path', '')
+        
+        if load_pretrained:
+            try:
+                print(f"--- Loading pre-trained model from: {load_model_path} ---")
+                # Load the state dict, making sure it's on the correct device
+                state_dict = torch.load(load_model_path, map_location=self.device, weights_only=True)
+                initial_model.load_state_dict(state_dict)
+                print("--- Model loaded successfully. ---")
+            except FileNotFoundError:
+                print(f"Warning: load_model_path '{load_model_path}' not found. Starting from scratch.")
+            except Exception as e:
+                print(f"Warning: Error loading model '{load_model_path}': {e}. Starting from scratch.")   
+
         # 2. Get the server instance (now includes various defenses)
+        
         self.server: BaseServer = get_server_instance( # Use BaseServer type hint
             self.config,
             model=copy.deepcopy(initial_model), # Server gets its own copy
