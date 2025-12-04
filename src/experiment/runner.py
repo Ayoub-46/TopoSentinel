@@ -1,7 +1,8 @@
 import torch
 import numpy as np
-from typing import Dict, List, Optional # Added Optional
+from typing import Dict, List, Optional
 import copy
+import os # Added import
 
 from .loggings import MetricsLogger
 from .utils import get_data_and_model, get_client_instance, get_server_instance, select_clients 
@@ -23,10 +24,14 @@ class FederatedExperiment:
         if torch.cuda.is_available():
             torch.cuda.manual_seed_all(self.seed)
 
-        # --- Attributes for data handling ---
         self.adapter: Optional[DatasetAdapter] = None 
         self.clients: List[BaseClient] = []
         self.server: Optional[BaseServer] = None 
+        
+        self.attack_enabled = False
+        self.attack_start_round = float('inf')
+        self.attack_end_round = float('inf')
+        self.malicious_ids = set()
 
         self.prev_global_params_cpu: Optional[Dict[str, torch.Tensor]] = None
         self.prev_global_grad_cpu: Optional[Dict[str, torch.Tensor]] = None
@@ -103,6 +108,20 @@ class FederatedExperiment:
              )
              self.clients.append(client)
 
+        # --- 4. Extract Attack Parameters for Metric Tracking (New) ---
+        attack_cfg = self.config.get('attack_params', {})
+        self.attack_enabled = attack_cfg.get('enabled', False)
+
+        if self.attack_enabled:
+            # Use float('inf') as default end if not specified, matching the helper
+            self.attack_start_round = attack_cfg.get('attack_start_round', 1) 
+            self.attack_end_round = attack_cfg.get('attack_end_round', float('inf')) 
+            self.malicious_ids = set(attack_cfg.get('malicious_client_ids', []))
+        else:
+            self.malicious_ids = set()
+            self.attack_start_round = float('inf')
+            self.attack_end_round = float('inf')
+
     def run(self):
         """
         Executes the FL rounds, tracks global updates, and evaluates backdoor success.
@@ -117,6 +136,19 @@ class FederatedExperiment:
         for round_idx in range(fl_cfg['num_rounds']):
             current_round_num = round_idx + 1 
             print(f"\n--- Round {current_round_num}/{fl_cfg['num_rounds']} ---")
+
+            # --- TPR/FPR Metric Setup: Set Ground Truth on Server (New) ---
+            malicious_ids_this_round = []
+            
+            # Check if the attack is enabled and if the current round falls within the attack window
+            if self.attack_enabled and (self.attack_start_round <= current_round_num <= self.attack_end_round):
+                # The set of malicious IDs is passed as the ground truth
+                malicious_ids_this_round = list(self.malicious_ids)
+            
+            # Pass the ground truth to the defense server if it has the set_malicious_ids method (from Mixin)
+            if hasattr(self.server, 'set_malicious_ids'):
+                self.server.set_malicious_ids(malicious_ids_this_round)
+            # -------------------------------------------------------------
             
             selected_clients = select_clients( 
                 client_list=self.clients,
@@ -176,10 +208,15 @@ class FederatedExperiment:
 
 
         self.logger.close()    
+        
+        # --- NEW: Call server.close() to trigger final metric reporting ---
+        if hasattr(self.server, 'close'):
+             self.server.close()
+        # ----------------------------------------------------------------------
+
         print("\n--- Experiment Finished ---")
         # Ensure output directory exists for saving model
         output_dir = self.config.get("output_dir", "results")
-        import os
         os.makedirs(output_dir, exist_ok=True)
         self.server.save_model(f"{output_dir}/{self.config['experiment_name']}_final_model.pth")
 
@@ -194,8 +231,11 @@ class FederatedExperiment:
         current_round_num = round_idx + 1 # Use 1-based index consistent with checks
         
         if attack_enabled:
-            attack_start_round = attack_cfg.get('attack_start_round', 1) # Default to 1 if not set
-            end = attack_cfg.get('attack_end_round', float('inf'))
+            # Note: Using the attributes set in _setup now, which match the original config structure
+            attack_start_round = self.attack_start_round # or attack_cfg.get('attack_start_round', 1) 
+            end = self.attack_end_round # or attack_cfg.get('attack_end_round', float('inf'))
+            
+            # Check if current round is within the attack window (inclusive end)
             if attack_start_round <= current_round_num <= end:
                 is_attack_active = True            
 
@@ -248,4 +288,3 @@ class FederatedExperiment:
             
         }
         self.logger.log_round(log_data)
-

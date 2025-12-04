@@ -4,7 +4,7 @@ device: "cuda"
 output_dir: "results"
 
 data_params:
-  dataset_name: 'cifar'
+  dataset_name: 'cifar10'
   root: 'data'
   download: true
   strategy: 'dirichlet'
@@ -17,7 +17,7 @@ fl_params:
 
 training_params:
   batch_size: 32
-  local_epochs: 1
+  local_epochs: 5
   optimizer: 'sgd'
   lr: 0.01
   momentum: 0.9

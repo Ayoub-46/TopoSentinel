@@ -1,0 +1,68 @@
+experiment_name: 'a3fl_45'
+seed: 42
+device: "cuda"
+output_dir: "results/ablation_mal_rate/"
+
+data_params:
+  dataset_name: 'gtsrb'
+  root: 'data'
+  download: true
+  strategy: 'iid'
+  alpha: 0.3
+
+fl_params:
+  num_clients: 20
+  clients_per_round: 20 
+  num_rounds: 100
+
+training_params:
+  batch_size: 32
+  local_epochs: 1
+  optimizer: 'sgd'
+  lr: 0.01
+  momentum: 0.9
+  weight_decay: 0.00
+  fedprox_mu: 0.01 # Use FedProx for benign clients to stabilize updates
+
+attack_params:
+  enabled: true
+  name: "a3fl"
+  malicious_client_ids: [0, 1, 2, 3, 4, 5, 6, 7, 8] 
+  
+  poison_fraction: 0.25 
+  target_label: 7 
+  attack_start_round: 50 
+  attack_end_round: 100
+  malicious_epochs: 5 
+  trigger:
+    name: 'a3fl'
+    kwargs:
+      in_channels: 3         
+      image_size: [32, 32]   
+      position: [28, 28]     
+      size: [3, 3]
+      # Hyperparameters for the trigger optimization process
+      trigger_lr: 0.01
+      lambda_balance: 0.1
+      adv_epochs: 100
+      adv_lr: 0.01
+defense_params:
+  enabled: true # Enable the analysis server
+  name: 'tda_bias'
+  # --- Topological Defense specific parameters ---
+  reduction_method: 'pca'
+  pca_variance_ratio: 0.95
+  metric_alpha: 1.0
+
+  # --- Parameters for Decaying Bottleneck Threshold ---
+  bottleneck_initial_threshold: 0.05  # START HIGH (Tune this)
+  bottleneck_decay_rate: 0.99       # Decay per round (Tune this, closer to 1 = slower decay)
+  bottleneck_min_threshold: 0.01    # Floor value (Tune this)
+
+
+  # --- Bias Filtering Parameters ---
+  bias_metric: 'euclidean'     # Metric for comparing bias vectors ('cosine' or 'euclidean')
+  mad_threshold: 2.0        # MAD z-score threshold for filtering bias outliers (tune this)
+
+  # --- General Defense Parameters ---
+  min_clients_for_defense: 5 # Minimum clients needed in a round to run defense logic 

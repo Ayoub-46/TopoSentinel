@@ -13,9 +13,9 @@ except ImportError:
     hdbscan = None
 
 from ..fl.server import FedAvgAggregator
+from .metrics_mixin import DefenseMetricsMixin
 
-
-class FlameServer(FedAvgAggregator):
+class FlameServer(DefenseMetricsMixin, FedAvgAggregator):
     """
     Implements the FLAME defense mechanism, adapted to be compatible
     with the new FedAvgAggregator base class.
@@ -23,17 +23,18 @@ class FlameServer(FedAvgAggregator):
     It filters clients based on clustering and then performs robust
     aggregation with clipping and adaptive noise.
     """
-    def __init__(self, 
-                 model: torch.nn.Module, 
-                 testloader: DataLoader = None, 
-                 device: Optional[torch.device] = None, 
-                 config: Optional[Dict] = None):
+    def __init__(self, *args, **kwargs):
         
         # Call the parent constructor
-        super().__init__(model, testloader, device)
+        super().__init__(*args, **kwargs)
 
         if hdbscan is None:
             raise ImportError("hdbscan is not installed. Please install it (pip install hdbscan) to use FlameServer.")
+
+        config = kwargs.get('defense_cfg', None)
+        if config is None and len(args) >= 4:
+            # Safely check the position where config was passed in the runner call
+            config = args[3]
 
         # FLAME pecific params
         self.config = config if config is not None else {}
@@ -54,15 +55,24 @@ class FlameServer(FedAvgAggregator):
         """
         if not self.received_updates:
             print("Warning: No updates to aggregate.")
-            # Return current model params
             return self.get_params()
 
+        client_ids_received_list = list(self.received_updates.keys())
+        client_ids_received_set = set(client_ids_received_list)
+        
         # 1. Detect anomalies
         benign_client_ids, malicious_client_ids, client_distances = self.detect_anomalies()
         
         print(f"Flame detected {len(malicious_client_ids)} anomalous clients.")
         if malicious_client_ids:
             print(f"Filtering out clients: {malicious_client_ids}")
+
+        rejected_client_ids = set(malicious_client_ids)
+        
+        self.update_defense_metrics(
+            client_ids_received=client_ids_received_set,
+            rejected_client_ids=rejected_client_ids
+        )
 
         # 2. Handle filtering
         if not benign_client_ids:
@@ -94,7 +104,6 @@ class FlameServer(FedAvgAggregator):
                 
                 diff = param_cpu.to(self.device) - global_params_cpu[name].to(self.device)
                 
-                # Apply clipping
                 client_dist = client_distances[client_id]
                 if client_dist > clip_norm:
                     diff.mul_(clip_norm / client_dist) 
@@ -116,7 +125,7 @@ class FlameServer(FedAvgAggregator):
         # 5. Clear buffer and return
         self.received_updates = {} 
         
-        return self.get_params() # Return new model state_dict (on CPU)
+        return self.get_params() 
 
     def detect_anomalies(self) -> Tuple[List[int], List[int], Dict[int, float]]:
         """

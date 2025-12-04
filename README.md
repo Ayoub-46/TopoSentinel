@@ -37,7 +37,7 @@ This framework is modular and easily extensible. It includes implementations of:
 * **Triggers:** Includes static `PatchTrigger`, dynamic `A3FLTrigger`, and generative `IBATrigger`.
 
 ### 2. Aggregation Defenses
-* **TopoSentinel (Ours)**: `TopologicalBiasDefenseServer` and `AnalysisServer` (for observation).
+* **TopoSentinel (Ours)**: `TopologicalBiasDefenseServer`.
 * **Krum / Multi-Krum**: `MKrumServer`.
 * **Flame**: `FlameServer`.
 * **DeepSight**: `DeepSightServer`.

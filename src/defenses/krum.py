@@ -5,26 +5,26 @@ from torch.utils.data import DataLoader
 import numpy as np
 
 from ..fl.server import FedAvgAggregator
+from .metrics_mixin import DefenseMetricsMixin
 
-class MKrumServer(FedAvgAggregator):
+class MKrumServer(DefenseMetricsMixin, FedAvgAggregator):
     """
     Implements the Multi-Krum (M-Krum) defense mechanism.
     
     It selects the 'm' clients with the lowest Krum scores and
     performs a standard FedAvg on only that subset.
     """
-    def __init__(self, 
-                 model: nn.Module, 
-                 testloader: DataLoader = None, 
-                 device: Optional[torch.device] = None, 
-                 config: Optional[Dict] = None):
+    def __init__(self, *args, **kwargs):
         
-        super().__init__(model, testloader, device)
+        super().__init__(*args, **kwargs)
+        
+        config = kwargs.get('defense_cfg')
+        if config is None and len(args) >= 4:
+            config = args[3]
         
         self.config = config if config is not None else {}
         self.num_byzantine = self.config.get('krum_f', 0)
-        self.num_to_select = self.config.get('krum_m', 1) # 'm' in the M-Krum paper
-
+        self.num_to_select = self.config.get('krum_m', 1)
         print(f"Initialized MKrumServer to tolerate f={self.num_byzantine} Byzantine clients and select m={self.num_to_select} for aggregation.")
 
     def aggregate(self) -> Dict[str, torch.Tensor]:
@@ -47,6 +47,12 @@ class MKrumServer(FedAvgAggregator):
         # If not met, fall back to the parent's standard FedAvg.
         if num_updates <= 2 * self.num_byzantine + 2:
             print(f"Warning: Not enough clients ({num_updates}) for Krum with f={self.num_byzantine}. Falling back to standard FedAvg.")
+            client_ids_received_set = set(client_ids_list)
+            rejected_client_ids = set() 
+            self.update_defense_metrics(
+                client_ids_received=client_ids_received_set,
+                rejected_client_ids=rejected_client_ids
+            )
             # super().aggregate() will average all clients and clear the buffer.
             return super().aggregate()
         
@@ -88,6 +94,16 @@ class MKrumServer(FedAvgAggregator):
         selected_client_ids = [client_ids_list[i] for i in selected_indices]
         
         print(f"Krum selected clients (by ID): {selected_client_ids}")
+
+        client_ids_received_set = set(client_ids_list)
+        selected_client_ids_set = set(selected_client_ids)
+        # Rejected clients are those received minus those selected
+        rejected_client_ids = client_ids_received_set - selected_client_ids_set
+
+        self.update_defense_metrics(
+            client_ids_received=client_ids_received_set,
+            rejected_client_ids=rejected_client_ids
+        )
 
         # 8. Aggregate only the selected clients using standard FedAvg logic
         

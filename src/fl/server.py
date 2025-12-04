@@ -19,7 +19,7 @@ class BaseServer(ABC):
         pass
 
 class FedAvgAggregator(BaseServer):
-    def __init__(self, model: torch.nn.Module, testloader=None, device: Optional[torch.device]=None):
+    def __init__(self, model: torch.nn.Module, testloader=None, device: Optional[torch.device]=None, *args, **kwargs):
         self.device = device if device is not None else torch.device("cpu")
         self.model = cp.deepcopy(model).to(self.device)
         self.loss_fn = nn.CrossEntropyLoss()

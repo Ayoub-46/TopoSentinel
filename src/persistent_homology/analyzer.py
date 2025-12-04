@@ -69,7 +69,7 @@ class TopologicalAnalyser:
             np.ndarray: The persistence diagram, shape (n_features_in_diagram, 3).
                         Columns are [birth, death, dimension]. Returns empty array if input is invalid.
         """
-        # --- Input Validation ---
+        # Input Validation 
         if not isinstance(data, np.ndarray):
             print("Warning: Input data must be a NumPy array.")
             return np.empty((0, 3))
@@ -88,17 +88,14 @@ class TopologicalAnalyser:
         if n_samples < 2: 
              return np.empty((0, 3)) # Return empty diagram
 
-        # --- Reshape for gtda ---
+
         # gtda expects input shape (n_batches, n_samples, n_features) or (n_batches, n_samples, n_samples)
         data_reshaped = data[np.newaxis, :, :]
 
-        # --- Compute Diagram ---
+        # Compute Diagram 
         try:
-            # fit_transform returns a list of diagrams (one per batch)
             diagrams_list = self.persistence.fit_transform(data_reshaped)
-            # Return the diagram for the single batch
             return diagrams_list[0]
         except Exception as e:
             print(f"Error computing persistence diagram: {e}")
-            # print(f"Input data shape: {data.shape}, Metric used: {self.metric_used}") # Debug info
-            return np.empty((0, 3)) # Return empty on error
+            return np.empty((0, 3)) 

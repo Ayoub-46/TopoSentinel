@@ -1,4 +1,4 @@
-experiment_name: 'a3fl_deepsight_cifar_noniid'
+experiment_name: 'a3fl_deepsight_cifar_iid'
 seed: 42
 device: "cuda"
 output_dir: "results"
@@ -7,7 +7,7 @@ data_params:
   dataset_name: 'cifar'
   root: 'data'
   download: true
-  strategy: 'dirichlet'
+  strategy: 'iid'
   
 
 fl_params:

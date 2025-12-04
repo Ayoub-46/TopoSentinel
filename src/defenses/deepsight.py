@@ -16,24 +16,25 @@ except ImportError:
 from ..fl.server import FedAvgAggregator
 from .utils import NoiseDataset
 from .const import NUM_CLASSES, IMG_SIZE
+from .metrics_mixin import DefenseMetricsMixin
 
-
-class DeepSightServer(FedAvgAggregator):
+class DeepSightServer(DefenseMetricsMixin, FedAvgAggregator):
     """
     Implements the DeepSight defense mechanism, adapted to be compatible
     with the new FedAvgAggregator base class.
     """
-    def __init__(self, 
-                 model: torch.nn.Module, 
-                 testloader: DataLoader = None, 
-                 device: Optional[torch.device] = None, 
-                 config: Optional[Dict] = None):
+    def __init__(self, *args, **kwargs):
         
-        super().__init__(model, testloader, device)
+        super().__init__(*args, **kwargs)
         
         if hdbscan is None:
             raise ImportError("hdbscan is not installed. Please install it (pip install hdbscan scipy) to use DeepSightServer.")
-            
+        
+        config = kwargs.get('defense_cfg', None)
+        if config is None and len(args) >= 4:
+             # Safely check the position where config was passed in the runner call
+            config = args[3]
+
         self.config = config if config is not None else {}
         self.num_samples = self.config.get('deepsight_num_samples', 256)
         self.num_seeds = self.config.get('deepsight_num_seeds', 3)
@@ -56,6 +57,10 @@ class DeepSightServer(FedAvgAggregator):
             print("Warning: No updates to aggregate.")
             return self.get_params()
         
+        all_client_ids = set(self.received_updates.keys())
+        anomalous_client_ids = []
+        client_distances = {}
+
         try:
             # 1. Detect anomalies
             anomalous_client_ids, client_distances = self.detect_anomalies()
@@ -65,9 +70,14 @@ class DeepSightServer(FedAvgAggregator):
                 print(f"Filtering out clients: {anomalous_client_ids}")
 
             # 2. Handle filtering
-            all_client_ids = set(self.received_updates.keys())
-            benign_client_ids = list(all_client_ids - set(anomalous_client_ids))
-
+            malicious_client_ids_set = set(anomalous_client_ids)
+            benign_client_ids = list(all_client_ids - malicious_client_ids_set)
+            
+            self.update_defense_metrics(
+                client_ids_received=all_client_ids,
+                rejected_client_ids=malicious_client_ids_set
+            )
+            
             if not benign_client_ids:
                 print("Warning: DeepSight filtered out all clients. Global model will not be updated.")
                 return self.get_params() 
@@ -114,6 +124,14 @@ class DeepSightServer(FedAvgAggregator):
 
             return self.get_params()
         
+        except Exception as e:
+            print(f"!!! Error during DeepSight aggregation: {e}. Falling back to non-filtering FedAvg. !!!")
+            self.update_defense_metrics(
+                client_ids_received=all_client_ids,
+                rejected_client_ids=set()
+            )
+            return super().aggregate()
+
         finally:
             # 5. Clear buffers
             self.received_updates = {}

@@ -4,8 +4,6 @@ import numpy as np
 import copy
 from torch.utils.data import DataLoader
 
-# --- Component Imports ---
-
 # Datasets
 from ..datasets.gtsrb import GTSRBDataset
 from ..datasets.cifar10 import CIFAR10Dataset
@@ -20,7 +18,6 @@ from ..models.mnist import MNISTNet
 from ..models.mnist import EMNIST_CNN 
 from ..models.unet import UNet, FEMNISTAutoencoder
 
-
 # Core FL Components
 from ..fl.client import BaseClient, BenignClient
 from ..fl.fedprox_client import FedProxClient
@@ -29,23 +26,19 @@ from ..fl.server import FedAvgAggregator
 # Attack Components
 from ..attacks.neurotoxin_client import NeurotoxinClient
 from ..attacks.a3fl_client import A3FLClient
-# --- ADD TDFedClient import ---
-from ..attacks.tdfed_client import TDFedClient
 from ..attacks.triggers.a3fl import A3FLTrigger
 from ..attacks.triggers.patch_trigger import PatchTrigger
 from ..attacks.triggers.iba import IBATrigger
 from ..attacks.iba_client import IBAClient
-from ..attacks.darkfed import DarkFedClient
-from ..attacks.mimic import MimicryClient
+from ..attacks.adaptive import BiasZeroingClient
 
 # Defense Components
 from ..defenses.krum import MKrumServer
 from ..defenses.flame import FlameServer
 from ..defenses.clip_dp import NormClippingServer
 from ..defenses.deepsight import DeepSightServer
-from ..defenses.analysis_server import AnalysisServer
-from ..defenses.tda_bias_defense import TopologicalBiasDefenseServer
-
+from ..defenses.tda_robust_defense import TopologicalRobustDefenseServer
+from ..defenses.bias_filter import BiasRobustDefenseServer
 
 def get_data_and_model(data_config: Dict) -> Tuple[DatasetAdapter, torch.nn.Module]: 
     """Returns the appropriate dataset adapter and model instance."""
@@ -95,25 +88,29 @@ def get_server_instance(config: Dict, model, test_loader, device):
     defense_name = defense_cfg.get('name', 'none').lower() if defense_enabled else 'none'
     dataset_name = config.get('data_params', {}).get('dataset_name', 'gtsrb').lower()
 
+    logging_kwargs = {
+        'output_dir': config.get("output_dir", "results"),
+        'experiment_name': config.get('experiment_name', 'default_exp')
+    }
+
     if defense_name == 'krum':
         print("Instantiating MKrum server.")
-        return MKrumServer(model, test_loader, device, defense_cfg)
+        return MKrumServer(model, test_loader, device, defense_cfg, **logging_kwargs)
     elif defense_name == 'flame':
         print("Instantiating Flame server.")
-        return FlameServer(model, test_loader, device, defense_cfg)
+        return FlameServer(model, test_loader, device, defense_cfg, **logging_kwargs)
     elif defense_name == 'norm_clipping_dp': 
         print("Instantiating Norm Clipping with DP server.")
-        return NormClippingServer(model, test_loader, device, defense_cfg)
+        return NormClippingServer(model, test_loader, device, defense_cfg, **logging_kwargs)
     elif defense_name == 'deepsight':
         print("Instantiating DeepSight server.")
         defense_cfg['dataset'] = dataset_name
-        return DeepSightServer(model, test_loader, device, defense_cfg)
-    elif defense_name == 'analysis':
-        print("Instantiating Analysis server (no defense).")
-        return AnalysisServer(model=model, testloader=test_loader, device=device, defense_config=defense_cfg)
-    elif defense_name == 'tda_bias':
-        print("Instantiating Topological Defense with Bias Analysis server.")
-        return TopologicalBiasDefenseServer(model=model, testloader=test_loader, device=device, defense_config=defense_cfg)
+        return DeepSightServer(model, test_loader, device, defense_cfg, **logging_kwargs)
+    elif defense_name == 'clip_tda':
+        return TopologicalRobustDefenseServer(model=model, testloader=test_loader, device=device, defense_config=defense_cfg, **logging_kwargs)
+    elif defense_name == 'bias':
+        print("Instantiating Bias Robust Defense server.")
+        return BiasRobustDefenseServer(model=model, testloader=test_loader, device=device, defense_config=defense_cfg, **logging_kwargs)
     else: # Default case: No defense or unknown defense name
         if defense_enabled and defense_name != 'none':
              print(f"Warning: Unknown defense '{defense_name}'. Falling back to standard FedAvg.")
@@ -136,7 +133,7 @@ def get_client_instance(
     malicious_ids = set(attack_cfg.get('malicious_client_ids', []))
     training_params = config['training_params']
 
-    # --- 1. Define all base arguments for any client ---
+    # 1. Define all base arguments for any client 
     base_client_args = {
         'id': client_id,
         'trainloader': train_loader, 
@@ -152,7 +149,7 @@ def get_client_instance(
         attack_name = attack_cfg.get('name')
         print(f"Instantiating malicious client {client_id} for attack: {attack_name}")
 
-        # --- 2. Create the Trigger object explicitly ---
+        # 2. Create the Trigger object explicitly 
         
         if 'trigger' in attack_cfg:
             trigger_cfg = attack_cfg['trigger']
@@ -197,24 +194,19 @@ def get_client_instance(
                  print(f"Warning: Unknown trigger name '{trigger_name}'. Trigger object will be None.")
 
 
-        # Prepare config dict to pass to the malicious client constructor
         malicious_config = copy.copy(attack_cfg) 
         malicious_config['trigger'] = trigger_obj
         malicious_config['seed'] = config.get('seed', 42)
 
-        # --- 3. Create Malicious Client ---
+        # 3. Create Malicious Client 
         if attack_name == 'neurotoxin':
             return NeurotoxinClient(attack_config=malicious_config, **base_client_args)
         elif attack_name == 'a3fl':
             return A3FLClient(attack_config=malicious_config, **base_client_args)
         elif attack_name == 'iba':
             return IBAClient(attack_config=malicious_config, **base_client_args)
-        elif attack_name == 'tdfed':
-            return TDFedClient(attack_config=malicious_config, **base_client_args)
-        elif attack_name == 'darkfed': 
-            return DarkFedClient(attack_config=malicious_config, **base_client_args)
-        elif attack_name == 'mimicry':
-            return MimicryClient(attack_config=malicious_config, **base_client_args)
+        elif attack_name == 'adaptive':
+            return BiasZeroingClient(attack_config=malicious_config, **base_client_args)
         else:
             # Fallback or error for unknown attack
              print(f"Warning: Unknown attack name '{attack_name}' for malicious client {client_id}. Creating BenignClient instead.")

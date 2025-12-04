@@ -1,4 +1,4 @@
-experiment_name: 'iba_flame_gtsrb_noniid'
+experiment_name: 'iba_flame_gtsrb_iid'
 seed: 42
 device: "cuda"
 output_dir: "results"
@@ -7,7 +7,7 @@ data_params:
   dataset_name: 'gtsrb'
   root: 'data'
   download: true
-  strategy: 'dirichlet'
+  strategy: 'iid'
   alpha: 0.1
   load_pretrained: false
   load_model_path: 'src/pretrained/gtsrb.pth'

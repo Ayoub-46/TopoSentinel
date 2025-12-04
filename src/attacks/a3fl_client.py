@@ -88,5 +88,7 @@ class A3FLClient(BenignClient):
             result = super().local_train(self.malicious_epochs, round_idx)
         finally:
             self.trainloader = original_loader
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
 
         return result

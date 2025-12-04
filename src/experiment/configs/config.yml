@@ -1,20 +1,23 @@
-experiment_name: 'experiment'
+experiment_name: 'a3fl_tda_bias_cifar_noniid'
 seed: 42
 device: "cuda"
-output_dir: "results"
+output_dir: "results_noniid/tda"
+
+
 
 data_params:
-  dataset_name: 'femnist'
+  dataset_name: 'cifar10'
   root: 'data'
   download: true
-  strategy: 'iid'
+  strategy: 'dirichlet'
+  alpha: 0.3
   load_pretrained: true
-  load_model_path: 'src/pretrained/femnist.pth'
+  load_model_path: 'src/pretrained/cifar10_noniid.pth'
 
 fl_params:
-  num_clients: 20
-  clients_per_round: 20 
-  num_rounds: 50
+  num_clients: 10
+  clients_per_round: 10 
+  num_rounds: 100
 
 training_params:
   batch_size: 32
@@ -22,35 +25,47 @@ training_params:
   optimizer: 'sgd'
   lr: 0.01
   momentum: 0.9
-  weight_decay: 0.00
-
+  weight_decay: 0.0001
+  
 attack_params:
   enabled: true
-  name: 'neurotoxin' 
-  malicious_client_ids: [0, 1, 2, 3]
-  target_label: 8
-  attack_start_round: 1 # Start attack after some initial convergence
-  attack_end_round: 30
-  poison_fraction: 0.25 # Fraction of local data attacker poisons
-  mask_k_percent: 0.25 # Neurotoxin: Mask top 5% important params (adjust as needed)
-  malicious_epochs: 20
-
-  # Trigger used by Neurotoxin for poisoning
+  name: "a3fl"
+  malicious_client_ids: [0, 1] 
+  
+  poison_fraction: 0.25 
+  target_label: 7 
+  attack_start_round: 20 
+  attack_end_round: 70
+  malicious_epochs: 5 
   trigger:
-    name: 'patch'
-    position: [28, 28] # Bottom-right for 32x32 GTSRB
-    size: [3, 3]
-    color: [1.0, 1.0, 1.0] # White patch
-
+    name: 'a3fl'
+    kwargs:
+      in_channels: 3         
+      image_size: [32, 32]   
+      position: [28, 28]     
+      size: [3, 3]
+      # Hyperparameters for the trigger optimization process
+      trigger_lr: 0.01
+      lambda_balance: 0.1
+      adv_epochs: 100
+      adv_lr: 0.01
 defense_params:
-  enabled: true 
-  name: 'flame'
-  # --- FLAME specific parameters ---
-  flame_lambda: 0.001
-  flame_eta: 1.0
-  krum_f: 5
-  krum_m: 15
-  deepsight_num_samples: 256
-  deepsight_num_seeds: 3
-  deepsight_batch_size: 64
-  deepsight_tau: 0.5
+  enabled: true # Enable the analysis server
+  name: 'tda_bias'
+  # --- Topological Defense specific parameters ---
+  reduction_method: 'pca'
+  pca_variance_ratio: 0.95
+  metric_alpha: 1.0
+
+  # --- Parameters for Decaying Bottleneck Threshold ---
+  bottleneck_initial_threshold: 0.1  # START HIGH (Tune this)
+  bottleneck_decay_rate: 0.80       # Decay per round (Tune this, closer to 1 = slower decay)
+  bottleneck_min_threshold: 0.009    # Floor value (Tune this)
+
+
+  # --- Bias Filtering Parameters ---
+  bias_metric: 'euclidean'     # Metric for comparing bias vectors ('cosine' or 'euclidean')
+  mad_threshold: 2.0        # MAD z-score threshold for filtering bias outliers (tune this)
+
+  # --- General Defense Parameters ---
+  min_clients_for_defense: 5 # Minimum clients needed in a round to run defense logic 

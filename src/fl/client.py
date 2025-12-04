@@ -89,45 +89,55 @@ class BenignClient(BaseClient):
         return {k: v.cpu().clone() for k, v in self._model.state_dict().items()}
 
     def local_train(self, epochs: int, round_idx: int, **kwargs) -> Dict[str, Any]:
+        
         """Train locally and return metrics collected during training."""
-        self.model.train()
         
-        train_loss, correct, total = 0.0, 0, 0
-        
-        for _ in range(epochs or self.epochs_default):
-            if self.trainloader is None: break
-            for inputs, targets in self.trainloader:
-                inputs, targets = inputs.to(self.device), targets.to(self.device)
-                
-                self.optimizer.zero_grad()
-                outputs = self.model(inputs)
-                loss = self.loss_fn(outputs, targets)
-                loss.backward()
-                self.optimizer.step()
+        try:
+            self.model.train()
+            
+            train_loss, correct, total = 0.0, 0, 0
+            
+            for _ in range(epochs or self.epochs_default):
+                if self.trainloader is None: break
+                for inputs, targets in self.trainloader:
+                    inputs, targets = inputs.to(self.device), targets.to(self.device)
+                    
+                    self.optimizer.zero_grad()
+                    outputs = self.model(inputs)
+                    loss = self.loss_fn(outputs, targets)
+                    loss.backward()
+                    self.optimizer.step()
 
-                # Accumulate metrics
-                train_loss += loss.item()
-                _, predicted = torch.max(outputs.data, 1)
-                total += targets.size(0)
-                correct += (predicted == targets).sum().item()
+                    # Accumulate metrics
+                    train_loss += loss.item()
+                    _, predicted = torch.max(outputs.data, 1)
+                    total += targets.size(0)
+                    correct += (predicted == targets).sum().item()
 
-        if self.scheduler:
-            self.scheduler.step()
+            if self.scheduler:
+                self.scheduler.step()
 
-        num_batches = len(self.trainloader) if self.trainloader else 1
-        avg_loss = train_loss / (num_batches * (epochs or self.epochs_default))
-        accuracy = correct / total if total > 0 else 0.0
-        
-        metrics = {'loss': avg_loss, 'accuracy': accuracy}
-        
-        result = {
-            'client_id': self.get_id(),
-            'num_samples': self.num_samples(),
-            'weights': self.get_params(),
-            'metrics': metrics,
-            'round_idx': round_idx
-        }
-        return result
+            num_batches = len(self.trainloader) if self.trainloader else 1
+            avg_loss = train_loss / (num_batches * (epochs or self.epochs_default))
+            accuracy = correct / total if total > 0 else 0.0
+            
+            metrics = {'loss': avg_loss, 'accuracy': accuracy}
+            
+            result = {
+                'client_id': self.get_id(),
+                'num_samples': self.num_samples(),
+                'weights': self.get_params(),
+                'metrics': metrics,
+                'round_idx': round_idx
+            }
+            return result
+        except Exception as e:
+            print(f"Error during local training on client {self.id}: {e}")
+            raise
+        finally:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
 
     def local_evaluate(self) -> Dict[str, Any]:
         """Evaluate the model on the local test set (or train set if no test set)."""

@@ -51,7 +51,7 @@ class NeurotoxinClient(BenignClient):
         self.attack_end_round = attack_config.get('attack_end_round', float('inf'))
         self.mask_k_percent = attack_config.get('mask_k_percent', 0.05)
         self.poison_fraction = attack_config.get('poison_fraction', 0.25)
-        self.malicious_epochs = attack_config.get('malicious_epochs', 1)
+        self.malicious_epochs = attack_config.get('malicious_epochs', 10)
         self.poisoned_dataset = BackdoorDataset(
             original_dataset=self.trainloader.dataset,
             trigger_fn=self.trigger.apply,

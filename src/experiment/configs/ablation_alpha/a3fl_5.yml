@@ -1,0 +1,64 @@
+experiment_name: 'neurotoxin_1.0'
+seed: 42
+device: "cuda"
+output_dir: "results/ablation_alpha/"
+
+data_params:
+  dataset_name: 'gtsrb'
+  root: 'data'
+  download: true
+  strategy: 'dirichlet'
+  alpha: 1.0
+
+fl_params:
+  num_clients: 20
+  clients_per_round: 20 
+  num_rounds: 100
+
+training_params:
+  batch_size: 32
+  local_epochs: 1
+  optimizer: 'sgd'
+  lr: 0.01
+  momentum: 0.9
+  weight_decay: 0.00
+  fedprox_mu: 0.01 # Use FedProx for benign clients to stabilize updates
+
+attack_params:
+  enabled: true
+  name: "neurotoxin"
+  malicious_client_ids: [0, 1] 
+  
+  target_label: 8
+  attack_start_round: 50 # Start attack after some initial convergence
+  attack_end_round: 100
+  poison_fraction: 0.25 # Fraction of local data attacker poisons
+  mask_k_percent: 0.05 # Neurotoxin: Mask top 5% important params (adjust as needed)
+
+  # Trigger used by Neurotoxin for poisoning
+  trigger:
+    name: 'patch'
+    position: [28, 28] # Bottom-right for 32x32 GTSRB
+    size: [3, 3]
+    color: [1.0, 1.0, 1.0] # White patch
+
+defense_params:
+  enabled: true # Enable the analysis server
+  name: 'tda_bias'
+  # --- Topological Defense specific parameters ---
+  reduction_method: 'pca'
+  pca_variance_ratio: 0.95
+  metric_alpha: 1.0
+
+  # --- Parameters for Decaying Bottleneck Threshold ---
+  bottleneck_initial_threshold: 0.25  # START HIGH (Tune this)
+  bottleneck_decay_rate: 0.99       # Decay per round (Tune this, closer to 1 = slower decay)
+  bottleneck_min_threshold: 0.01    # Floor value (Tune this)
+
+
+  # --- Bias Filtering Parameters ---
+  bias_metric: 'euclidean'     # Metric for comparing bias vectors ('cosine' or 'euclidean')
+  mad_threshold: 2.0        # MAD z-score threshold for filtering bias outliers (tune this)
+
+  # --- General Defense Parameters ---
+  min_clients_for_defense: 5 # Minimum clients needed in a round to run defense logic 

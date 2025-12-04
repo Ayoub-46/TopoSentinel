@@ -3,7 +3,6 @@ import yaml
 import pprint 
 
 from src.experiment.runner import FederatedExperiment
-from src.experiment.parallel_runner import ParallelFederatedExperiment
 
 def main():
     """
@@ -32,12 +31,7 @@ def main():
     pprint.pprint(config)
     print("---------------------------------")
 
-    # 3. Create an instance of the experiment
-    if args.parallel:
-        experiment = ParallelFederatedExperiment(config)
-    else:
-        experiment = FederatedExperiment(config)    
-    # 4. Run the experiment!
+    experiment = FederatedExperiment(config)    
     experiment.run()
 
 if __name__ == "__main__":
